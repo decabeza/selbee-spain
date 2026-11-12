@@ -4,6 +4,8 @@ SELBEE SPAIN - Bonoloto Research Dashboard
 
 Historical draw database and experimental EV analysis.
 """
+import json
+from collections import Counter
 
 import sqlite3
 from pathlib import Path
@@ -117,6 +119,133 @@ else:
 
 
 st.divider()
+
+# ---------------------------------------------------------
+# Historical combination analysis
+# ---------------------------------------------------------
+
+st.divider()
+
+st.header("Historical combination analysis")
+
+if DATABASE_PATH.exists():
+
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        historical = pd.read_sql_query(
+            """
+            SELECT
+                draw_date,
+                main_numbers,
+                complementary,
+                reintegro,
+                source
+            FROM historical_combinations
+            ORDER BY draw_date
+            """,
+            connection,
+        )
+
+    if not historical.empty:
+
+        total_combinations = len(historical)
+        missing_reintegro = historical["reintegro"].isna().sum()
+        available_reintegro = total_combinations - missing_reintegro
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric(
+            "Historical combinations",
+            f"{total_combinations:,}",
+        )
+
+        col2.metric(
+            "First recorded draw",
+            historical["draw_date"].min(),
+        )
+
+        col3.metric(
+            "Last recorded draw",
+            historical["draw_date"].max(),
+        )
+
+        col4.metric(
+            "Available reintegros",
+            f"{available_reintegro:,} / {total_combinations:,}",
+        )
+
+        st.caption(
+            f"{missing_reintegro:,} historical records have no "
+            "reintegro information."
+        )
+
+        # Main number frequencies
+
+        st.subheader("Main number frequency")
+
+        main_numbers = Counter()
+
+        for combination in historical["main_numbers"]:
+            main_numbers.update(json.loads(combination))
+
+        main_frequency = pd.DataFrame({
+            "Number": range(1, 50),
+            "Occurrences": [
+                main_numbers[number] for number in range(1, 50)
+            ],
+        }).set_index("Number")
+
+        st.bar_chart(main_frequency)
+
+        st.dataframe(
+            main_frequency.sort_values(
+                "Occurrences",
+                ascending=False,
+            ),
+            use_container_width=True,
+        )
+
+        # Complementary number frequencies
+
+        st.subheader("Complementary number frequency")
+
+        complementary_frequency = (
+            historical["complementary"]
+            .value_counts()
+            .reindex(range(1, 50), fill_value=0)
+            .sort_index()
+        )
+
+        st.bar_chart(
+            complementary_frequency.rename("Occurrences")
+        )
+
+        # Reintegro frequencies
+
+        st.subheader("Reintegro frequency")
+
+        reintegro_frequency = (
+            historical["reintegro"]
+            .dropna()
+            .astype(int)
+            .value_counts()
+            .reindex(range(10), fill_value=0)
+            .sort_index()
+        )
+
+        st.bar_chart(
+            reintegro_frequency.rename("Occurrences")
+        )
+
+        st.caption(
+            "Historical frequencies are descriptive statistics. "
+            "They do not predict future lottery outcomes."
+        )
+
+    else:
+        st.info("No historical combinations available.")
+
+else:
+    st.info("Historical database not found.")
 
 
 # ---------------------------------------------------------
