@@ -1,9 +1,14 @@
+
 """
 SELBEE SPAIN - Bonoloto Research Dashboard
 
-First experimental interface for Bonoloto EV analysis.
+Historical draw database and experimental EV analysis.
 """
 
+import sqlite3
+from pathlib import Path
+
+import pandas as pd
 import streamlit as st
 
 from selbee.games.bonoloto import (
@@ -11,6 +16,9 @@ from selbee.games.bonoloto import (
     probability_of_any_prize,
 )
 from selbee.games.bonoloto_ev import estimate_ev_per_line
+
+
+DATABASE_PATH = Path("data/processed/selbee.db")
 
 
 st.set_page_config(
@@ -22,13 +30,106 @@ st.set_page_config(
 st.title("SELBEE SPAIN")
 st.caption("Quantitative research into Spanish lottery games")
 
-st.warning(
-    "Experimental model: this version does not yet incorporate "
-    "category rollovers or prize equalization into the EV calculation. "
-    "Results are indicative, pre-tax estimates, not verified opportunities."
-)
+
+# ---------------------------------------------------------
+# Historical database
+# ---------------------------------------------------------
+
+st.header("Historical database")
+
+if DATABASE_PATH.exists():
+
+    with sqlite3.connect(DATABASE_PATH) as connection:
+
+        draws = pd.read_sql_query(
+            """
+            SELECT
+                draw_id,
+                draw_date,
+                main_numbers,
+                complementary,
+                reintegro,
+                entries,
+                revenue_eur,
+                prize_fund_eur,
+                jackpot_rollover_eur
+            FROM draws
+            ORDER BY draw_date DESC
+            """,
+            connection,
+        )
+
+    if not draws.empty:
+
+        total_draws = len(draws)
+        total_revenue = draws["revenue_eur"].sum()
+        average_revenue = draws["revenue_eur"].mean()
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Stored draws", f"{total_draws:,}")
+        col2.metric("Total historical revenue", f"{total_revenue:,.2f} €")
+        col3.metric("Average revenue per draw", f"{average_revenue:,.2f} €")
+
+        st.subheader("Draw history")
+
+        st.dataframe(
+            draws,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        selected_draw_id = st.selectbox(
+            "Select a draw to inspect its prize categories",
+            draws["draw_id"].tolist(),
+        )
+
+        with sqlite3.connect(DATABASE_PATH) as connection:
+
+            categories = pd.read_sql_query(
+                """
+                SELECT
+                    category,
+                    description,
+                    winners,
+                    prize_per_winner
+                FROM prize_categories
+                WHERE draw_id = ?
+                ORDER BY category
+                """,
+                connection,
+                params=(selected_draw_id,),
+            )
+
+        st.subheader(f"Prize categories — Draw {selected_draw_id}")
+
+        st.dataframe(
+            categories,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    else:
+        st.info("The database exists but contains no draws.")
+
+else:
+    st.info("No historical database found. Import Bonoloto JSON files first.")
+
+
+st.divider()
+
+
+# ---------------------------------------------------------
+# Experimental EV scenario analyzer
+# ---------------------------------------------------------
 
 st.header("Bonoloto — Scenario analysis")
+
+st.warning(
+    "Experimental model: category rollovers and prize equalization "
+    "are not yet incorporated into this EV calculation. "
+    "Results are indicative and pre-tax."
+)
 
 st.sidebar.header("Draw parameters")
 
@@ -128,6 +229,7 @@ try:
     st.divider()
 
     st.subheader("Scenario inputs")
+
     st.write(f"Draw revenue: {revenue_eur:,.2f} €")
     st.write(f"First category pool: {first_prize_pool_eur:,.2f} €")
     st.write(f"Other participating lines: {other_entries:,}")
@@ -135,6 +237,7 @@ try:
 
 except (ValueError, TypeError) as error:
     st.error(f"Unable to calculate this scenario: {error}")
+
 
 st.divider()
 
