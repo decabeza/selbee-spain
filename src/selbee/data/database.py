@@ -58,6 +58,18 @@ def initialize_database(
 
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS historical_combinations (
+                draw_date TEXT PRIMARY KEY,
+                main_numbers TEXT NOT NULL,
+                complementary INTEGER NOT NULL,
+                reintegro INTEGER,
+                source TEXT NOT NULL
+            )
+            """
+        )
+
+        connection.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_draws_date
             ON draws(draw_date)
             """
@@ -164,3 +176,54 @@ def count_draws(
         ).fetchone()
 
     return result[0]
+
+def save_historical_combination(
+    draw: dict,
+    db_path: Path = DEFAULT_DATABASE_PATH,
+) -> None:
+    """Save a historical combination without silently overwriting conflicts."""
+
+    initialize_database(db_path)
+
+    with sqlite3.connect(db_path) as connection:
+        existing = connection.execute(
+            """
+            SELECT main_numbers, complementary, reintegro
+            FROM historical_combinations
+            WHERE draw_date = ?
+            """,
+            (draw["date"],),
+        ).fetchone()
+
+        expected = (
+            json.dumps(draw["numbers"]),
+            draw["complementary"],
+            draw["reintegro"],
+        )
+
+        if existing is not None:
+            if existing != expected:
+                raise ValueError(
+                    f"Conflicting combination already exists for {draw['date']}"
+                )
+            return
+
+        connection.execute(
+            """
+            INSERT INTO historical_combinations (
+                draw_date,
+                main_numbers,
+                complementary,
+                reintegro,
+                source
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                draw["date"],
+                expected[0],
+                expected[1],
+                expected[2],
+                draw["source"],
+            ),
+        )
